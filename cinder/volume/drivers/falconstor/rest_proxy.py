@@ -14,17 +14,18 @@
 #    under the License.
 
 import base64
-import httplib
 import json
 import random
 import time
 import uuid
-from __init__ import *  # NOQA
+
+from . import *  # NOQA
 from cinder import exception
-from cinder.i18n import _, _LE, _LW
+from cinder.i18n import _, _LE, _LI, _LW
 from oslo_log import log as logging
 from oslo_utils import excutils
 from oslo_utils import units
+from six.moves import http_client
 
 PRODUCT_NAME = 'ipstor'
 SESSION_COOKIE_NAME = 'session_id'
@@ -95,10 +96,8 @@ class RESTProxy(object):
     def _encode_name(self, name):
         uuid_str = name.replace("-", "")
         vol_uuid = uuid.UUID('urn:uuid:%s' % uuid_str)
-        snap_id_encoded = base64.b64encode(vol_uuid.bytes)
-        encoded_name = "".join(
-            i for i in snap_id_encoded if i not in "<>\"&$/\'")
-        newuuid = encoded_name.replace("=", "")
+        newuuid = (base64.urlsafe_b64encode(vol_uuid.bytes).
+                   decode('utf-8').strip('='))
         return "cinder-%s" % newuuid
 
     def do_setup(self):
@@ -112,7 +111,7 @@ class RESTProxy(object):
             return 0
 
     def _convert_size_to_mb(self, size):
-        return int(size * units.Gi / 1024 / 1024)
+        return size * units.Ki
 
     def _get_pools_info(self):
         qpools = []
@@ -126,6 +125,7 @@ class RESTProxy(object):
                         poolid = int(item['id'])
                         qpools.append(poolid)
                         break
+
             if not qpools:
                 msg = 'The storage pool infomation is empty or not correct'
                 raise exception.DriverNotInitialized(msg)
@@ -201,23 +201,23 @@ class RESTProxy(object):
 
         if 'thinprovisioned' in volume_metadata:
             if volume_metadata['thinprovisioned'] is False:
-                msg = ('If you want to create a thin provisioning volume,'
-                       ' this param must be True.')
+                msg = (_('If you want to create a thin provisioning volume,'
+                         ' this param must be True.'))
                 raise exception.VolumeBackendAPIException(msg)
 
         if 'thinsize' in volume_metadata:
             thin_size = int(volume_metadata['thinsize'])
 
         if size < 10:
-            msg = 'The resource is a thin device, minimum size is 10240 MB'
+            msg = _('The resource is a thin device, minimum size is 10240 MB')
             raise exception.VolumeBackendAPIException(msg)
         else:
             try:
                 if thin_size > size:
-                    msg = 'The allocated size must less than total size.'
+                    msg = _('The allocated size must less than total size.')
                     raise exception.VolumeBackendAPIException(msg)
             except Exception:
-                msg = 'The resource is a thin device, thin size is invalid.'
+                msg = _('The resource is a thin device, thin size is invalid.')
                 raise exception.VolumeBackendAPIException(msg)
 
             thin_size = self._convert_size_to_mb(thin_size)
@@ -240,7 +240,7 @@ class RESTProxy(object):
                     if item['name'] in volume_name:
                         vid.append(item['id'])
         except Exception:
-            msg = ('Can not found cinder volume - %(volumeName)s' %
+            msg = (_('Can not found cinder volume - %(volumeName)s') %
                    {"volumeName": volume_name})
             raise exception.VolumeBackendAPIException(msg)
 
@@ -257,8 +257,7 @@ class RESTProxy(object):
                     gid = item['id']
                     break
             if gid == '':
-                msg = ('Can not found consistency group - %(groupName)s' %
-                       {"groupName": group_name})
+                msg = (_('Can not found consistency group: %s') % group_name)
                 raise exception.VolumeBackendAPIException(msg)
         return gid
 
@@ -312,7 +311,7 @@ class RESTProxy(object):
         if vid:
             return self.FSS.delete_vdev(vid)
         else:
-            msg = ('vid is null. FSS failed to delete volume')
+            msg = _('vid is null. FSS failed to delete volume')
             raise exception.VolumeBackendAPIException(data=msg)
 
     def create_snapshot(self, snapshot):
@@ -322,11 +321,11 @@ class RESTProxy(object):
         size = snapshot['volume_size']
         vid = self._get_fss_vid_from_name(volume_name, FSS_SINGLE_TYPE)
         if not vid:
-            msg = ('vid is null. FSS failed to create snapshot')
+            msg = _('vid is null. FSS failed to create snapshot')
             raise exception.VolumeBackendAPIException(data=msg)
 
-        (snap, tm_policy, vdev_size) = \
-            self.FSS._check_if_snapshot_tm_exist(vid)
+        (snap, tm_policy, vdev_size) = (self.FSS.
+                                        _check_if_snapshot_tm_exist(vid))
 
         if not snap:
             self.create_vdev_snapshot(vid, self._convert_size_to_mb(size))
@@ -345,11 +344,11 @@ class RESTProxy(object):
         snap_name = snapshot["display_name"]
         vid = self._get_fss_vid_from_name(volume_name, FSS_SINGLE_TYPE)
         if not vid:
-            msg = ('vid is null. FSS failed to delete snapshot')
+            msg = _('vid is null. FSS failed to delete snapshot')
             raise exception.VolumeBackendAPIException(data=msg)
         if not snap_name:
-            if 'metadata' in snapshot and 'fss_tm_comment' in \
-                    snapshot['metadata']:
+            if ('metadata' in snapshot and
+               'fss_tm_comment' in snapshot['metadata']):
                 snap_name = snapshot['metadata']['fss_tm_comment']
 
         tm_info = self.FSS.get_timemark(vid)
@@ -380,19 +379,19 @@ class RESTProxy(object):
         new_vol_name = self._get_fss_volume_name(volume)
         vid = self._get_fss_vid_from_name(volume_name, FSS_SINGLE_TYPE)
         if not vid:
-            msg = 'vid is null. FSS failed to create_volume_from_snapshot.'
+            msg = _('vid is null. FSS failed to create_volume_from_snapshot.')
             raise exception.VolumeBackendAPIException(data=msg)
 
         if not snap_name:
-            if 'metadata' in snapshot and 'fss_tm_comment' in \
-                    snapshot['metadata']:
+            if ('metadata' in snapshot) and ('fss_tm_comment'
+                                             in snapshot['metadata']):
                 snap_name = snapshot['metadata']['fss_tm_comment']
 
         tm_info = self.FSS.get_timemark(vid)
         rawtimestamp = self._get_timestamp(tm_info, snap_name)
         if not rawtimestamp:
-            msg = ('rawtimestamp is null. '
-                   'FSS failed to create_volume_from_snapshot.')
+            msg = _('rawtimestamp is null. FSS failed to '
+                    'create_volume_from_snapshot.')
             raise exception.VolumeBackendAPIException(data=msg)
 
         timestamp = '%s_%s' % (vid, rawtimestamp)
@@ -507,8 +506,8 @@ class RESTProxy(object):
         vidlist = self._get_vdev_id_from_group_id(gid)
 
         for vid in vidlist:
-            (snap, tm_policy, sizemb) = \
-                self.FSS._check_if_snapshot_tm_exist(vid)
+            (snap, tm_policy, sizemb) = (self.FSS.
+                                         _check_if_snapshot_tm_exist(vid))
             if not snap:
                 self.create_vdev_snapshot(vid, sizemb)
             if not tm_policy:
@@ -543,7 +542,7 @@ class RESTProxy(object):
         gid = self._get_fss_gid_from_name(group_name)
 
         if not gid:
-            msg = ('gid is null. FSS failed to delete cgsnapshot')
+            msg = _('gid is null. FSS failed to delete cgsnapshot')
             raise exception.VolumeBackendAPIException(data=msg)
 
         if self._get_fss_group_membercount(gid) != 0:
@@ -578,7 +577,7 @@ class RESTProxy(object):
     def _check_iocluster_state(self):
         output = self.FSS.get_server_options()
         if 'iocluster' not in output['data']:
-            raise ValueError("No iocluster information in given data")
+            raise ValueError(_('No iocluster information in given data'))
         return output['data']['iocluster']
 
     def list_fc_target_wwpn(self):
@@ -610,9 +609,9 @@ class RESTProxy(object):
     def _get_fc_host(self, connector):
         target_info = self.list_iscsi_target_info()
         if 'data' not in target_info:
-            raise ValueError("No data information in return info.")
+            raise ValueError(_('No data information in return info.'))
         if 'iscsitargets' not in target_info['data']:
-            raise ValueError("No iscsitargets in return info.")
+            raise ValueError(_('No iscsitargets in return info.'))
 
         if target_info['data']['iscsitargets']:
             iscsitargets = target_info['data']['iscsitargets']
@@ -627,9 +626,9 @@ class RESTProxy(object):
         is_empty = False
         output = self.FSS.list_sanclient_info(client_id)
         if 'data' not in output:
-            raise ValueError("No target in given data")
+            raise ValueError(_('No target in given data'))
         if 'fcdevices' not in output['data']:
-            raise ValueError("No fcdevices in given data")
+            raise ValueError(_('No fcdevices in given data'))
 
         if len(output['data']['fcdevices']) == 0:
             is_empty = True
@@ -662,9 +661,9 @@ class RESTProxy(object):
     def _get_iscsi_host(self, connector):
         target_info = self.list_iscsi_target_info()
         if 'data' not in target_info:
-            raise ValueError("No data information in return info.")
+            raise ValueError(_('No data information in return info.'))
         if 'iscsitargets' not in target_info['data']:
-            raise ValueError("No iscsitargets in return info.")
+            raise ValueError(_('No iscsitargets in return info.'))
 
         if target_info['data']['iscsitargets']:
             iscsitargets = target_info['data']['iscsitargets']
@@ -692,7 +691,7 @@ class RESTProxy(object):
         fc_available_initiator = []
         fc_initiators_info = self.list_fc_client_initiators()
         if 'data' not in fc_initiators_info:
-            raise ValueError("No data information in return info.")
+            raise ValueError(_('No data information in return info.'))
 
         if fc_initiators_info['data']:
             fc_initiators = fc_initiators_info['data']
@@ -713,12 +712,11 @@ class RESTProxy(object):
         volume_name = self._get_fss_volume_name(volume)
         vid = self._get_fss_vid_from_name(volume_name, FSS_SINGLE_TYPE)
         if not vid:
-            msg = ('Can not found cinder volume - %(volumeName)s' %
-                   {"volumeName": volume_name})
+            msg = (_('Can not found cinder volume - %s') % volume_name)
             raise exception.VolumeBackendAPIException(msg)
 
-        available_initiator, fc_initiators_info = self. \
-            _get_fc_client_initiators(connector)
+        available_initiator, fc_initiators_info = (
+            self._get_fc_client_initiators(connector))
 
         if fc_initiators_info is None:
             msg = _('No FC initiator can be added to host.')
@@ -750,10 +748,10 @@ class RESTProxy(object):
             time.sleep(3)
         except FSSHTTPError as err:
             with excutils.save_and_reraise_exception() as ctxt:
-                if err.code == 2415984845 and "XML_ERROR_CLIENT_EXIST" in err. \
-                        text:
+                if (err.code == 2415984845 and "XML_ERROR_CLIENT_EXIST"
+                                               in err.text):
                     ctxt.reraise = False
-                LOG.warning(_LW("Assign volume failed with message: %(msg)s."),
+                LOG.warning(_LW('Assign volume failed with message: %(msg)s.'),
                             {"msg": err.reason})
         finally:
             lun = self.FSS._get_fc_client_info(client_id, vid)
@@ -773,9 +771,9 @@ class RESTProxy(object):
 
         output = self.list_volume_info(vid)
         if 'data' not in output:
-            raise ValueError("No vdev information in given data")
+            raise ValueError(_('No vdev information in given data'))
         if 'clients' not in output['data']:
-            raise ValueError("No clients in vdev information.")
+            raise ValueError(_('No clients in vdev information.'))
 
         client_info = output['data']['clients']
 
@@ -787,16 +785,15 @@ class RESTProxy(object):
                 'Can not found client id. The connection target name is %s')
             raise exception.VolumeBackendAPIException(
                 data=msg % connector["initiator"])
-
         try:
             self.unassign_vdev(client_id, vid)
         except FSSHTTPError as err:
             with excutils.save_and_reraise_exception() as ctxt:
-                if err.code == 2415984988 and "XML_ERROR_VIRTUAL_DEV_NOT_" \
-                                              "ASSIGNED_TO_iSCSI_TARGET" in err \
-                        .text:
+                if (err.code == 2415984988 and
+                        "XML_ERROR_VIRTUAL_DEV_NOT_ASSIGNED_TO_iSCSI_TARGET"
+                        in err.text):
                     ctxt.reraise = False
-                LOG.warning(_LW("Disconnection failed with message: "
+                LOG.warning(_LW('Disconnection failed with message: '
                                 "%(msg)s."), {"msg": err.reason})
         return client_id
 
@@ -822,7 +819,7 @@ class RESTProxy(object):
         try:
             vid = self._get_fss_vid_from_name(volume_name, FSS_SINGLE_TYPE)
             if not vid:
-                msg = ('Can not found cinder volume - %(volumeName)s' %
+                msg = (_('Can not found cinder volume - %(volumeName)s') %
                        {"volumeName": volume_name})
                 raise exception.VolumeBackendAPIException(msg)
 
@@ -830,8 +827,9 @@ class RESTProxy(object):
             time.sleep(3)
         except FSSHTTPError as err:
             with excutils.save_and_reraise_exception() as ctxt:
-                if err.code == 2415984989 and "XML_ERROR_VIRTUAL_DEV_ASSIGNED_" \
-                                              "TO_iSCSI_TARGET" in err.text:
+                if (err.code == 2415984989 and
+                        "XML_ERROR_VIRTUAL_DEV_ASSIGNED_TO_iSCSI_TARGET" in
+                        err.text):
                     ctxt.reraise = False
                 LOG.warning(_LW("Assign volume failed with message: %(msg)s."),
                             {"msg": err.reason})
@@ -851,17 +849,17 @@ class RESTProxy(object):
         vid = self._get_fss_vid_from_name(volume_name, FSS_SINGLE_TYPE)
         client_id, target_id = self._get_iscsi_host(connector)
         if not client_id:
-            msg = _('Can not found client id. '
-                    'The connection target name is %s')
+            msg = _('Can not found client id. The connection target name '
+                    'is %s')
             raise exception.VolumeBackendAPIException(
                 data=msg % connector["initiator"])
         try:
             self.unassign_vdev(client_id, vid)
         except FSSHTTPError as err:
             with excutils.save_and_reraise_exception() as ctxt:
-                if err.code == 2415984988 and "XML_ERROR_VIRTUAL_DEV_NOT_" \
-                                              "ASSIGNED_TO_iSCSI_TARGET" in err \
-                        .text:
+                if (err.code == 2415984988 and
+                        "XML_ERROR_VIRTUAL_DEV_NOT_ASSIGNED_TO_iSCSI_TARGET"
+                        in err.text):
                     ctxt.reraise = False
                 LOG.warning(_LW("Disconnection failed with message: "
                                 "%(msg)s."), {"msg": err.reason})
@@ -888,9 +886,9 @@ class RESTProxy(object):
                 reason=_("Unable to find volume with FSS vid =%s") % vid)
 
         if 'data' not in vdev_info:
-            raise ValueError("No vdev information in given data")
+            raise ValueError(_('No vdev information in given data'))
         if 'sizemb' not in vdev_info['data']:
-            raise ValueError("No vdev sizemb in vdev information.")
+            raise ValueError(_('No vdev sizemb in vdev information.'))
 
         return vdev_info['data']['sizemb']
 
@@ -940,12 +938,14 @@ class FSSRestCommon(object):
         else:
             request_body = None
 
-        connection = httplib.HTTPConnection(self.hostip, 80, timeout=60)
+        connection = http_client.HTTPConnection(self.hostip, 80, timeout=60)
 
         if self.fss_debug:
-            LOG.info(("[FSS_RESTAPI]==%(method)s@url=%(url)s===="
-                      "@request_body=%(body)s===" %
-                      {"method": method, "url": url, "body": request_body}))
+            LOG.info(_LI("[FSS_RESTAPI]====%(method)s@url=%(url)s ===="
+                         "@request_body=%(body)s===") % {
+                     "method": method,
+                     "url": url,
+                     "body": request_body})
 
         attempt = 1
         while True:
@@ -961,16 +961,16 @@ class FSSRestCommon(object):
                     pass
 
             if self.fss_debug:
-                LOG.info(("[FSS_RESTAPI]===@json_data=%(json_data)s=======" %
-                          {"json_data": json_data}))
+                LOG.info(_LI("[FSS_RESTAPI]==@json_data: %s ==") % json_data)
 
             if response.status == 200:
                 return json_data
             elif response.status == 404:
-                msg = ('FSS rest api return failed, method=%(method)s, '
-                       'uri=%(url)s, response=%(response)s' %
-                       {"method": method, "url": url,
-                        "response": response_body})
+                msg = (_('FSS rest api return failed, method=%(method)s, '
+                         'uri=%(url)s, response=%(response)s') % {
+                       "method": method,
+                       "url": url,
+                       "response": response_body})
                 raise exception.VolumeBackendAPIException(msg)
             else:
                 err_code = json_data['rc']
@@ -987,7 +987,7 @@ class FSSRestCommon(object):
                     )
                     raise FSSHTTPError(err_target, err)
                 attempt += 1
-                LOG.warning(_LW("Retry with rc: %(msg)s."), {"msg": err_code})
+                LOG.warning(_LW("Retry with rc: %s."), err_code)
                 self._random_sleep(RETRY_INTERVAL)
                 if err_code == 107:
                     self.fss_login()
@@ -1069,8 +1069,7 @@ class FSSRestCommon(object):
         while True:
             self._random_sleep()
             if time.time() > starttime + timeout:
-                msg = ('FSS get mirror sync timeout on vid: %(id)s ') % {
-                    'id': vid}
+                msg = (_('FSS get mirror sync timeout on vid: %s ') % vid)
                 raise exception.VolumeBackendAPIException(data=msg)
             elif self._check_mirror_sync_status(vid) is True:
                 break
@@ -1102,8 +1101,7 @@ class FSSRestCommon(object):
                     if item['name'] in volume_name:
                         vid.append(item['id'])
         except Exception:
-            msg = ('Can not found cinder volume - %(volumeName)s' %
-                   {"volumeName": volume_name})
+            msg = (_('Can not found cinder volume - %s') % volume_name)
             raise exception.VolumeBackendAPIException(msg)
 
         if type is not None and type == FSS_SINGLE_TYPE:
@@ -1204,8 +1202,7 @@ class FSSRestCommon(object):
         while True:
             self._random_sleep()
             if time.time() > starttime + timeout:
-                msg = ('FSS get timemark copy timeout on vid: %(id)s ') % {
-                    'id': vid}
+                msg = (_('FSS get timemark copy timeout on vid: %s') % vid)
                 raise exception.VolumeBackendAPIException(data=msg)
             elif self._check_tm_copy_status(vid) is True:
                 finished = True
@@ -1324,9 +1321,9 @@ class FSSRestCommon(object):
         output = self.list_sanclient_info(client_id)
 
         if 'data' not in output:
-            raise ValueError("No target in given data")
+            raise ValueError(_('No target in given data'))
         if 'iscsidevices' not in output['data']:
-            raise ValueError("No iscsidevices in given data")
+            raise ValueError(_('No iscsidevices in given data'))
 
         for iscsidevices in output['data']['iscsidevices']:
             if int(vid) == int(iscsidevices['id']):
@@ -1343,9 +1340,9 @@ class FSSRestCommon(object):
         hosting_cnt = 0
         output = self.list_sanclient_info(client_id)
         if 'data' not in output:
-            raise ValueError("No target in given data")
+            raise ValueError(_('No target in given data'))
         if 'iscsidevices' not in output['data']:
-            raise ValueError("No iscsidevices in given data")
+            raise ValueError(_('No iscsidevices in given data'))
 
         if len(output['data']['iscsidevices']) == 0:
             is_empty = True
@@ -1373,9 +1370,9 @@ class FSSRestCommon(object):
         output = self.list_iscsi_target_info()
 
         if 'data' not in output:
-            raise ValueError("No target in given data")
+            raise ValueError(_('No target in given data'))
         if 'iscsitargets' not in output['data']:
-            raise ValueError("No iscsitargets for target")
+            raise ValueError(_('No iscsitargets for target'))
 
         for targets in output['data']['iscsitargets']:
             if 'name' in targets:
@@ -1404,9 +1401,9 @@ class FSSRestCommon(object):
         lun = 0
         output = self.list_sanclient_info(client_id)
         if 'data' not in output:
-            raise ValueError("No target in given data")
+            raise ValueError(_('No target in given data'))
         if 'fcdevices' not in output['data']:
-            raise ValueError("No fcdevices in given data")
+            raise ValueError(_('No fcdevices in given data'))
 
         for fcdevices in output['data']['fcdevices']:
             if int(vid) == int(fcdevices['id']):
@@ -1483,6 +1480,5 @@ class FSSRestCommon(object):
             if output['rc'] == 0:
                 return output
         except Exception:
-            msg = ('Can not found this error code:%(msg)s.' %
-                   {"msg": err_id})
+            msg = (_('Can not found this error code:%s.') % err_id)
             raise exception.APIException(reason=msg)

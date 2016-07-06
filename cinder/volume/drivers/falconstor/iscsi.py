@@ -12,19 +12,18 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-"""
-Volume driver for FalconStor FSS storage system.
+"""Volume driver for FalconStor FSS storage system.
 
 This driver requires FSS-8.00-8865 or later.
 """
 
 from cinder.volume.drivers.falconstor import fss_common
 
-
 DEFAULT_ISCSI_PORT = 3260
 
 
 class FSSISCSIDriver(fss_common.FalconstorBaseDriver):
+
     """Implements commands for FalconStor FSS ISCSI management.
 
     To enable the driver add the following line to the cinder configuration:
@@ -45,27 +44,18 @@ class FSSISCSIDriver(fss_common.FalconstorBaseDriver):
 
     """
 
-    VERSION = '2.02'
+    VERSION = '2.0.2'
 
     def __init__(self, *args, **kwargs):
         super(FSSISCSIDriver, self).__init__(*args, **kwargs)
         self._storage_protocol = "iSCSI"
-        self._backend_name = (self.configuration.volume_backend_name or
-                              self.__class__.__name__)
-
-    def get_volume_stats(self, refresh=False):
-        """Get volume status."""
-        data = super(FSSISCSIDriver, self).get_volume_stats(refresh)
-        backend_name = self.configuration.safe_get('volume_backend_name')
-        data['volume_backend_name'] = backend_name or self.__class__.__name__
-        data['storage_protocol'] = self._storage_protocol
-        data['driver_version'] = self.VERSION
-        return data
+        self._backend_name = (
+            self.configuration.safe_get('volume_backend_name') or
+            self.__class__.__name__)
 
     def initialize_connection(self, volume, connector, initiator_data=None):
         fss_hosts = []
         target_portal = []
-
         multipath = connector.get('multipath', False)
         fss_hosts.append(self.configuration.san_ip)
 
@@ -83,7 +73,7 @@ class FSSISCSIDriver(fss_common.FalconstorBaseDriver):
                                                              connector,
                                                              fss_hosts)
         properties = {}
-        properties['target_discovered'] = False
+        properties['target_discovered'] = True
         properties['discard'] = True
         properties['encrypted'] = False
         properties['qos_specs'] = None

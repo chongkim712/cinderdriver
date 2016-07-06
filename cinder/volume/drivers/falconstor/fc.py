@@ -12,11 +12,9 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-"""
+"""Fibre channel Cinder volume driver for FalconStor FSS storage system.
 
-Fibre channel Cinder volume driver for FalconStor FSS storage system.
 This driver requires FSS-8.00-8865 or later.
-
 """
 
 from cinder import exception
@@ -29,13 +27,14 @@ LOG = logging.getLogger(__name__)
 
 
 class FSSFCDriver(fss_common.FalconstorBaseDriver):
+
     """Implements commands for FalconStor FSS FC management.
 
     To enable the driver add the following line to the cinder configuration:
         volume_driver=cinder.volume.drivers.falconstor.fc.FSSFCDriver
 
     Version history:
-        1.00 - Initial driver
+        1.0.0 - Initial driver
 
     """
 
@@ -45,8 +44,9 @@ class FSSFCDriver(fss_common.FalconstorBaseDriver):
         super(FSSFCDriver, self).__init__(*args, **kwargs)
         self.gateway_fc_wwns = []
         self._storage_protocol = "FC"
-        self._backend_name = (self.configuration.volume_backend_name or
-                              self.__class__.__name__)
+        self._backend_name = (
+            self.configuration.safe_get('volume_backend_name') or
+            self.__class__.__name__)
         self._lookup_service = fczm_utils.create_lookup_service()
 
     def do_setup(self, context):
@@ -60,15 +60,6 @@ class FSSFCDriver(fss_common.FalconstorBaseDriver):
         if len(self.gateway_fc_wwns) == 0:
             msg = _('No FC targets found')
             raise exception.InvalidHost(reason=msg)
-
-    def get_volume_stats(self, refresh=False):
-        """Get volume status."""
-        data = super(FSSFCDriver, self).get_volume_stats(refresh)
-        backend_name = self.configuration.safe_get('volume_backend_name')
-        data['volume_backend_name'] = backend_name or self.__class__.__name__
-        data['storage_protocol'] = self._storage_protocol
-        data['driver_version'] = self.VERSION
-        return data
 
     def validate_connector(self, connector):
         """Check connector for at least one enabled FC protocol."""
@@ -106,8 +97,8 @@ class FSSFCDriver(fss_common.FalconstorBaseDriver):
         host_id = self.proxy.fc_terminate_connection(volume, connector)
         fc_info = {"driver_volume_type": "fibre_channel", "data": {}}
         if self.proxy._check_fc_host_devices_empty(host_id):
-            available_initiator, fc_initiators_info = \
-                self.proxy._get_fc_client_initiators(connector)
+            available_initiator, fc_initiators_info = (
+                self.proxy._get_fc_client_initiators(connector))
             init_targ_map = self._build_initiator_target_map(
                 available_initiator)
             fc_info["data"] = {"target_wwn": self.gateway_fc_wwns,

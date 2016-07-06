@@ -12,8 +12,7 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-"""
-Volume driver for FalconStor FSS storage system.
+"""Volume driver for FalconStor FSS storage system.
 
 This driver requires FSS-8.00-8865 or later.
 """
@@ -25,6 +24,7 @@ import six
 from . import *  # NOQA
 from cinder import exception
 from cinder.i18n import _, _LE, _LI, _LW
+from cinder.image import image_utils
 from cinder.volume import driver
 from cinder.volume.drivers.falconstor import rest_proxy
 from cinder.volume.drivers.san import san
@@ -46,6 +46,9 @@ class FalconstorBaseDriver(san.SanDriver,
         if self.configuration.additional_retry_list:
             RETRY_LIST.append(self.configuration.additional_retry_list)
         self.proxy = rest_proxy.RESTProxy(self.configuration)
+        self.backend_name = (
+            self.configuration.safe_get('volume_backend_name') or 'FalconStor')
+        self.storage_protocol = 'iSCSI'
 
     def do_setup(self, context):
         self.proxy.do_setup()
@@ -83,7 +86,6 @@ class FalconstorBaseDriver(san.SanDriver,
             if not self.configuration.san_secondary_ip:
                 msg = (_('The san_secondary_ip param is null.'))
                 raise exception.VolumeBackendAPIException(data=msg)
-
             output = self.proxy._check_iocluster_state()
             if not output:
                 msg = (_('FSS do not support multipathing.'))
@@ -115,20 +117,20 @@ class FalconstorBaseDriver(san.SanDriver,
         if not volume_metadata:
             volume_name, fss_metadata = self.proxy.create_vdev(volume)
         else:
-            if 'timeview' in volume_metadata and (
-                    'cdptag' in volume_metadata or
-                    'rawtimestamp' in volume_metadata):
+            if ("timeview" in volume_metadata and
+                    ("cdptag" in volume_metadata) or
+                    ("rawtimestamp" in volume_metadata)):
                 volume_name, fss_metadata = self.proxy.create_tv_from_cdp_tag(
                     volume_metadata, volume)
-            elif 'thinprovisioned' in volume_metadata and 'thinsize' in \
-                    volume_metadata:
+            elif ("thinprovisioned" in volume_metadata and
+                    "thinsize" in volume_metadata):
                 volume_name, fss_metadata = self.proxy.create_thin_vdev(
                     volume_metadata, volume)
             else:
                 volume_name, fss_metadata = self.proxy.create_vdev(volume)
             fss_metadata.update(volume_metadata)
 
-        if 'metadata' in volume and type(volume['metadata']) is dict:
+        if type(volume['metadata']) is dict:
             fss_metadata.update(volume['metadata'])
         if volume['consistencygroup_id']:
             self.proxy._add_volume_to_consistency_group(
@@ -161,7 +163,7 @@ class FalconstorBaseDriver(san.SanDriver,
         volume_metadata = self._get_volume_metadata(volume)
         fss_metadata.update(volume_metadata)
 
-        if 'metadata' in volume and type(volume['metadata']) is dict:
+        if type(volume['metadata']) is dict:
             fss_metadata.update(volume['metadata'])
         return {'metadata': fss_metadata}
 
@@ -217,8 +219,9 @@ class FalconstorBaseDriver(san.SanDriver,
                         "Cleaning volume. "), {'id': volume["id"],
                                                'msg': err.reason})
 
-        if 'metadata' in volume and type(volume['metadata']) is dict:
+        if type(volume['metadata']) is dict:
             fss_metadata.update(volume['metadata'])
+
         if volume['consistencygroup_id']:
             self.proxy._add_volume_to_consistency_group(
                 volume['consistencygroup_id'],
@@ -253,15 +256,18 @@ class FalconstorBaseDriver(san.SanDriver,
                     used_space = int(info['used_gb'])
                     free_space = int(total_capacity - used_space)
 
-                data = {
-                    "vendor_name": "FalconStor",
-                    "storage_protocol": '',
-                    "total_capacity_gb": total_capacity,
-                    "free_capacity_gb": free_space,
-                    "reserved_percentage": 0,
-                    "consistencygroup_support": True
-                }
+                data = {"vendor_name": "FalconStor",
+                        "volume_backend_name": self._backend_name,
+                        "driver_version": self.VERSION,
+                        "storage_protocol": self._storage_protocol,
+                        "total_capacity_gb": total_capacity,
+                        "free_capacity_gb": free_space,
+                        "reserved_percentage": 0,
+                        "consistencygroup_support": True
+                        }
+
                 self._stats = data
+
             except Exception as exc:
                 LOG.error(_LE('Cannot get volume status %(exc)s.'),
                           {'exc': exc})
@@ -340,7 +346,6 @@ class FalconstorBaseDriver(san.SanDriver,
                 'status': 'deleted',
             })
         model_update = {'status': cgsnapshot.status}
-
         return model_update, snapshot_updates
 
     def manage_existing(self, volume, existing_ref):
@@ -369,9 +374,15 @@ class FalconstorBaseDriver(san.SanDriver,
         self.proxy.unmanage(volume)
 
     def copy_image_to_volume(self, context, volume, image_service, image_id):
-        super(FalconstorBaseDriver, self).copy_image_to_volume(context, volume,
-                                                               image_service,
-                                                               image_id)
+        with image_utils.temporary_file() as tmp:
+            image_utils.fetch_verify_image(context, image_service,
+                                           image_id, tmp)
+        image_utils.fetch_to_raw(context,
+                                 image_service,
+                                 image_id,
+                                 tmp,
+                                 self.configuration.volume_dd_blocksize,
+                                 size=volume['size'])
 
     def copy_volume_to_image(self, context, volume, image_service, image_meta):
         """Copy the volume to the specified image."""
