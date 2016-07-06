@@ -30,12 +30,15 @@ ISCSI_DRIVER = DRIVER_PATH + ".iscsi.FSSISCSIDriver"
 
 PRIMARY_IP = '10.0.0.1'
 SECONDARY_IP = '10.0.0.2'
-FAKE_ID = '123'
+FAKE_ID = 123
 FAKE = 'fake'
 FAKE_HOST = 'fakehost'
 API_RESPONSE = {'rc': 0}
 ISCSI_VOLUME_BACKEND_NAME = "FSSISCSIDriver"
 SESSION_ID = "a76d506c-abcd-1234-efgh-710e1fd90527"
+VOLUME_ID = '6068ea6d-f221-4213-bde9-f1b50aecdf36'
+ADD_VOLUME_ID = '6068ed7f-f231-4283-bge9-f1b51aecdf36'
+GROUP_ID = 'd03338a9-9115-48a3-8dfc-35cdfcdc15a7'
 
 PORTAL_RESPONSE = {'rc': 0, 'ipaddress': FAKE}
 VOLUME_METADATA = {'metadata': {'FSS-vid': 1}}
@@ -45,8 +48,8 @@ DATA_SERVER_INFO = 0, {'metadata': {'vendor': 'FalconStor', 'version': '1.5'}}
 FSS_SINGLE_TYPE = 'single'
 RAWTIMESTAMP = '1324975390'
 
-VOLUME = {'id': FAKE_ID,
-          'name': "volume-" + FAKE_ID,
+VOLUME = {'id': VOLUME_ID,
+          'name': "volume-" + VOLUME_ID,
           'display_name': 'fake_volume',
           'display_description': '',
           'size': 1,
@@ -75,11 +78,11 @@ DATA_OUTPUT = VOLUME_NAME, VOLUME_METADATA
 SNAPSHOT_METADATA = {'fss-tm-comment': None}
 
 ADD_VOLUME_IN_CG = {
-    'id': FAKE_ID,
+    'id': ADD_VOLUME_ID,
     'display_name': 'abc123',
     'display_description': '',
     'size': 1,
-    'consistencygroup_id': FAKE_ID,
+    'consistencygroup_id': GROUP_ID,
     'status': 'available',
     'host': "hostname@backend#%s" % FAKE_ID}
 
@@ -88,16 +91,16 @@ REMOVE_VOLUME_IN_CG = {
     'display_name': 'fe2dbc515810451dab2f8c8a48d15bee',
     'display_description': '',
     'size': 1,
-    'consistencygroup_id': FAKE_ID,
+    'consistencygroup_id': GROUP_ID,
     'status': 'available',
     'host': "hostname@backend#%s" % FAKE_ID}
 
-CONSISTGROUP = {'id': FAKE_ID,
+CONSISTGROUP = {'id': GROUP_ID,
                 'name': 'fake_group',
                 'description': 'fake_group_des',
                 'status': ''}
 CG_SNAPSHOT = {
-    'consistencygroup_id': FAKE_ID,
+    'consistencygroup_id': GROUP_ID,
     'id': '3c61b0f9-842e-46bf-b061-5e0031d8083f',
     'name': 'cgsnapshot1',
     'description': 'cgsnapshot1',
@@ -106,8 +109,8 @@ CG_SNAPSHOT = {
 SNAPSHOT_ID = "abcdabcd-1234-abcd-1234-abcdeffedcbb"
 SNAPSHOT = {'name': "snapshot-" + SNAPSHOT_ID,
             'id': SNAPSHOT_ID,
-            'volume_id': FAKE_ID,
-            'volume_name': "volume-" + FAKE_ID,
+            'volume_id': VOLUME_ID,
+            'volume_name': "volume-" + VOLUME_ID,
             'volume_size': 2,
             'display_name': "fake_snapshot",
             'display_description': '',
@@ -127,12 +130,12 @@ ISCSI_CONNECTOR = {'initiator': INITIATOR_IQN,
 ISCSI_INFO = {
     'driver_volume_type': 'iscsi',
     'data': {
-        'target_discovered': False,
+        'target_discovered': True,
         'discard': True,
         'encrypted': False,
         'qos_specs': None,
         'access_mode': 'rw',
-        'volume_id': FAKE_ID,
+        'volume_id': VOLUME_ID,
         'target_iqn': ISCSI_PORTS['iqn'],
         'target_portal': ISCSI_IPS[0] + ':' + TARGET_PORT,
         'target_lun': 1
@@ -147,7 +150,7 @@ ISCSI_MULTIPATH_INFO = {
         'encrypted': False,
         'qos_specs': None,
         'access_mode': 'rw',
-        'volume_id': FAKE_ID,
+        'volume_id': VOLUME_ID,
         'target_iqns': [ISCSI_PORTS['iqn']],
         'target_portals': [ISCSI_IPS[0] + ':' + TARGET_PORT],
         'target_luns': [1]
@@ -180,7 +183,7 @@ FC_INFO = {
     'driver_volume_type': 'fibre_channel',
     'data': {
         'target_discovered': True,
-        'volume_id': FAKE_ID,
+        'volume_id': VOLUME_ID,
         'target_lun': 1,
         'target_wwn': FC_TARGET_WWPNS,
         'initiator_target_map': FC_INITIATOR_TARGET_MAP
@@ -246,7 +249,7 @@ class TestFSSISCSIDriver(FSSDriverTestCase):
         self.driver.proxy.extend_vdev.assert_called_once_with(VOLUME_NAME,
                                                               VOLUME["size"],
                                                               EXTENT_NEW_SIZE)
-        self.assertIsNone(result)
+        self.assertTrue(result is None)
 
     @mock.patch.object(proxy.RESTProxy, '_get_fss_volume_name')
     def test_clone_volume(self, mock__get_fss_volume_name):
@@ -273,7 +276,7 @@ class TestFSSISCSIDriver(FSSDriverTestCase):
         self.driver.proxy.delete_vdev = mock.Mock()
         result = self.driver.delete_volume(VOLUME)
         self.driver.proxy.delete_vdev.assert_called_once_with(VOLUME)
-        self.assertIsNone(result)
+        self.assertTrue(result is None)
 
     def test_create_snapshot(self):
         snap_name = SNAPSHOT.get('display_name')
@@ -283,13 +286,13 @@ class TestFSSISCSIDriver(FSSDriverTestCase):
             return_value=API_RESPONSE)
         result = self.driver.create_snapshot(SNAPSHOT)
         self.driver.proxy.create_snapshot.assert_called_once_with(SNAPSHOT)
-        self.assertEqual({'metadata': SNAPSHOT_METADATA}, result)
+        self.assertEqual(result, {'metadata': SNAPSHOT_METADATA})
 
     def test_delete_snapshot(self):
         self.driver.proxy.delete_snapshot = mock.Mock()
         result = self.driver.delete_snapshot(SNAPSHOT)
         self.driver.proxy.delete_snapshot.assert_called_once_with(SNAPSHOT)
-        self.assertIsNone(result)
+        self.assertTrue(result is None)
 
     @mock.patch.object(proxy.RESTProxy, 'create_volume_from_snapshot')
     @mock.patch.object(proxy.RESTProxy, '_get_fss_volume_name')
@@ -363,7 +366,7 @@ class TestFSSISCSIDriver(FSSDriverTestCase):
         self.driver.update_consistencygroup(ctxt, CONSISTGROUP,
                                             add_volumes=add_vols,
                                             remove_volumes=remove_vols)
-        mock_set_group.assert_called_with(FAKE_ID,
+        mock_set_group.assert_called_with(GROUP_ID,
                                           addvollist=expected_addvollist,
                                           remvollist=expected_remvollist)
 
@@ -512,7 +515,7 @@ class TestRESTProxy(test.TestCase):
                       sizemb=sizemb,
                       category="virtual",
                       name=volume_name)
-        self.proxy.create_vdev(VOLUME)
+        volume_name, api_res = self.proxy.create_vdev(VOLUME)
         self.FSS_MOCK.create_vdev.assert_called_once_with(params)
 
     @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name')
@@ -556,7 +559,7 @@ class TestRESTProxy(test.TestCase):
         self.FSS_MOCK.sync_mirror.assert_called_once_with(FAKE_ID)
         self.FSS_MOCK.promote_mirror.assert_called_once_with(FAKE_ID,
                                                              VOLUME_NAME)
-        self.assertNotEqual(VOLUME_METADATA, ret)
+        self.assertNotEqual(ret, VOLUME_METADATA)
 
     @mock.patch.object(proxy.RESTProxy, 'create_vdev_snapshot')
     @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name')
@@ -692,6 +695,7 @@ class TestRESTProxy(test.TestCase):
 
         self.proxy.set_group(CONSISTGROUP, addvollist=expected_addvollist,
                              remvollist=expected_remvollist)
+
         if expected_addvollist:
             mock__get_fss_vid_from_name.assert_any_call(expected_addvollist)
 
@@ -725,6 +729,7 @@ class TestRESTProxy(test.TestCase):
                                mock_create_vdev_snapshot
                                ):
         vid_list = [1]
+
         group_name = "cinder-consisgroup-%s" % CG_SNAPSHOT[
             'consistencygroup_id']
         mock__get_group_name_from_id.return_value = group_name
