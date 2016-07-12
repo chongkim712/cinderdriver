@@ -17,12 +17,16 @@
 This driver requires FSS-8.00-8865 or later.
 """
 
+from cinder import interface
+import cinder.volume.driver
 from cinder.volume.drivers.falconstor import fss_common
 
 DEFAULT_ISCSI_PORT = 3260
 
 
-class FSSISCSIDriver(fss_common.FalconstorBaseDriver):
+@interface.volumedriver
+class FSSISCSIDriver(fss_common.FalconstorBaseDriver,
+                     cinder.volume.driver.ISCSIDriver):
 
     """Implements commands for FalconStor FSS ISCSI management.
 

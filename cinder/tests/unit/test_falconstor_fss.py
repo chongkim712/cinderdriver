@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from copy import deepcopy
 import mock
 
 from cinder import context
@@ -21,7 +22,6 @@ from cinder.volume import configuration as conf
 from cinder.volume.drivers.falconstor import fc
 from cinder.volume.drivers.falconstor import iscsi
 from cinder.volume.drivers.falconstor import rest_proxy as proxy
-from copy import deepcopy
 
 
 DRIVER_PATH = "cinder.volume.drivers.falconstor"
@@ -234,22 +234,23 @@ class TestFSSISCSIDriver(FSSDriverTestCase):
         self.assertRaises(exception.VolumeBackendAPIException,
                           self.driver.check_for_setup_error)
 
-    def test_create_volume(self):
-        self.driver.proxy.create_vdev = mock.Mock(return_value=DATA_OUTPUT)
+    @mock.patch.object(proxy.RESTProxy, 'create_vdev',
+                       return_value=DATA_OUTPUT)
+    def test_create_volume(self, mock_create_vdev):
         self.driver.create_volume(VOLUME)
-        self.driver.proxy.create_vdev.assert_called_once_with(VOLUME)
+        mock_create_vdev.assert_called_once_with(VOLUME)
 
-    @mock.patch.object(proxy.RESTProxy, '_get_fss_volume_name')
+    @mock.patch.object(proxy.RESTProxy, '_get_fss_volume_name',
+                       return_value=VOLUME_NAME)
     def test_extend_volume(self, mock__get_fss_volume_name):
         """Volume extended_volume successfully."""
-        mock__get_fss_volume_name.return_value = VOLUME_NAME
         self.driver.proxy.extend_vdev = mock.Mock()
         result = self.driver.extend_volume(VOLUME, EXTENT_NEW_SIZE)
         mock__get_fss_volume_name.assert_called_once_with(VOLUME)
         self.driver.proxy.extend_vdev.assert_called_once_with(VOLUME_NAME,
                                                               VOLUME["size"],
                                                               EXTENT_NEW_SIZE)
-        self.assertTrue(result is None)
+        self.assertIsNone(result)
 
     @mock.patch.object(proxy.RESTProxy, '_get_fss_volume_name')
     def test_clone_volume(self, mock__get_fss_volume_name):
@@ -264,7 +265,7 @@ class TestFSSISCSIDriver(FSSDriverTestCase):
 
         mock__get_fss_volume_name.assert_any_call(VOLUME)
         mock__get_fss_volume_name.assert_any_call(SRC_VOL)
-        assert 2 == mock__get_fss_volume_name.call_count
+        self.assertEqual(2, mock__get_fss_volume_name.call_count)
 
         self.driver.proxy.extend_vdev(VOLUME_NAME, VOLUME["size"],
                                       SRC_VOL["size"])
@@ -272,45 +273,43 @@ class TestFSSISCSIDriver(FSSDriverTestCase):
                                                          VOLUME["size"],
                                                          SRC_VOL["size"])
 
-    def test_delete_volume(self):
-        self.driver.proxy.delete_vdev = mock.Mock()
+    @mock.patch.object(proxy.RESTProxy, 'delete_vdev')
+    def test_delete_volume(self, mock_delete_vdev):
         result = self.driver.delete_volume(VOLUME)
-        self.driver.proxy.delete_vdev.assert_called_once_with(VOLUME)
-        self.assertTrue(result is None)
+        mock_delete_vdev.assert_called_once_with(VOLUME)
+        self.assertIsNone(result)
 
-    def test_create_snapshot(self):
+    @mock.patch.object(proxy.RESTProxy, 'create_snapshot',
+                                        return_value=API_RESPONSE)
+    def test_create_snapshot(self, mock_create_snapshot):
         snap_name = SNAPSHOT.get('display_name')
         SNAPSHOT_METADATA["fss-tm-comment"] = snap_name
-
-        self.driver.proxy.create_snapshot = mock.Mock(
-            return_value=API_RESPONSE)
         result = self.driver.create_snapshot(SNAPSHOT)
-        self.driver.proxy.create_snapshot.assert_called_once_with(SNAPSHOT)
+        mock_create_snapshot.assert_called_once_with(SNAPSHOT)
         self.assertEqual(result, {'metadata': SNAPSHOT_METADATA})
 
-    def test_delete_snapshot(self):
-        self.driver.proxy.delete_snapshot = mock.Mock()
+    @mock.patch.object(proxy.RESTProxy, 'delete_snapshot',
+                                        return_value=API_RESPONSE)
+    def test_delete_snapshot(self, mock_delete_snapshot):
         result = self.driver.delete_snapshot(SNAPSHOT)
-        self.driver.proxy.delete_snapshot.assert_called_once_with(SNAPSHOT)
-        self.assertTrue(result is None)
+        mock_delete_snapshot.assert_called_once_with(SNAPSHOT)
+        self.assertIsNone(result)
 
-    @mock.patch.object(proxy.RESTProxy, 'create_volume_from_snapshot')
-    @mock.patch.object(proxy.RESTProxy, '_get_fss_volume_name')
+    @mock.patch.object(proxy.RESTProxy, 'create_volume_from_snapshot',
+                       return_value=(VOLUME_NAME, VOLUME_METADATA))
+    @mock.patch.object(proxy.RESTProxy, '_get_fss_volume_name',
+                                        return_value=VOLUME_NAME)
     def test_create_volume_from_snapshot(self, mock__get_fss_volume_name,
                                          mock_create_volume_from_snapshot):
         vol_size = VOLUME['size']
         snap_size = SNAPSHOT['volume_size']
-
-        mock_create_volume_from_snapshot.return_value = (VOLUME_NAME,
-                                                         VOLUME_METADATA)
-        mock__get_fss_volume_name.return_value = VOLUME_NAME
         self.driver.proxy.extend_vdev = mock.Mock()
 
         self.assertEqual(
             self.driver.create_volume_from_snapshot(VOLUME, SNAPSHOT),
             dict(metadata=VOLUME_METADATA))
-        mock_create_volume_from_snapshot. \
-            assert_called_once_with(VOLUME, SNAPSHOT)
+        mock_create_volume_from_snapshot.assert_called_once_with(VOLUME,
+                                                                 SNAPSHOT)
 
         if vol_size != snap_size:
             mock__get_fss_volume_name.assert_called_once_with(VOLUME)
@@ -403,15 +402,16 @@ class TestFSSISCSIDriver(FSSDriverTestCase):
         expected_snapshot_update = [dict(id=mock_snap.id, status='deleted')]
         self.assertEqual(expected_snapshot_update, snapshots)
 
-    @mock.patch.object(proxy.RESTProxy, 'initialize_connection_iscsi')
+    @mock.patch.object(proxy.RESTProxy, 'initialize_connection_iscsi',
+                       return_value=ISCSI_PORTS)
     def test_initialize_connection(self, mock_initialize_connection_iscsi):
         FSS_HOSTS = []
         FSS_HOSTS.append(PRIMARY_IP)
-        mock_initialize_connection_iscsi.return_value = ISCSI_PORTS
-
         ret = self.driver.initialize_connection(VOLUME, ISCSI_CONNECTOR)
-        mock_initialize_connection_iscsi. \
-            assert_called_once_with(VOLUME, ISCSI_CONNECTOR, FSS_HOSTS)
+        mock_initialize_connection_iscsi.assert_called_once_with(
+            VOLUME,
+            ISCSI_CONNECTOR,
+            FSS_HOSTS)
         result = deepcopy(ISCSI_INFO)
         self.assertDictMatch(result, ret)
 
@@ -431,14 +431,17 @@ class TestFSSISCSIDriver(FSSDriverTestCase):
         fss_hosts.append(SECONDARY_IP)
 
         self.driver.initialize_connection(VOLUME, multipath_connector)
-        mock_initialize_connection_iscsi. \
-            assert_called_once_with(VOLUME, multipath_connector, fss_hosts)
+        mock_initialize_connection_iscsi.assert_called_once_with(
+            VOLUME,
+            multipath_connector,
+            fss_hosts)
 
     @mock.patch.object(proxy.RESTProxy, 'terminate_connection_iscsi')
     def test_terminate_connection(self, mock_terminate_connection_iscsi):
         self.driver.terminate_connection(VOLUME, ISCSI_CONNECTOR)
-        mock_terminate_connection_iscsi. \
-            assert_called_once_with(VOLUME, ISCSI_CONNECTOR)
+        mock_terminate_connection_iscsi.assert_called_once_with(
+            VOLUME,
+            ISCSI_CONNECTOR)
 
     @mock.patch.object(proxy.RESTProxy, '_manage_existing_volume')
     @mock.patch.object(proxy.RESTProxy, '_get_existing_volume_ref_vid')
@@ -451,12 +454,12 @@ class TestFSSISCSIDriver(FSSDriverTestCase):
         mock__manage_existing_volume.assert_called_once_with(
             volume_ref['source-id'], VOLUME)
 
-    @mock.patch.object(proxy.RESTProxy, '_get_existing_volume_ref_vid')
+    @mock.patch.object(proxy.RESTProxy, '_get_existing_volume_ref_vid',
+                       return_value=5120)
     def test_manage_existing_get_size(self, mock__get_existing_volume_ref_vid):
         ref_vid = 1
         volume_ref = {'source-id': ref_vid}
         expected_size = 5
-        mock__get_existing_volume_ref_vid.return_value = 5120
         size = self.driver.manage_existing_get_size(VOLUME, volume_ref)
         mock__get_existing_volume_ref_vid.assert_called_once_with(volume_ref)
         self.assertEqual(expected_size, size)
@@ -479,8 +482,22 @@ class TestFSSFCDriver(FSSDriverTestCase):
         fss_hosts = []
         fss_hosts.append(PRIMARY_IP)
         self.driver.initialize_connection(VOLUME, FC_CONNECTOR)
-        mock_fc_initialize_connection. \
-            assert_called_once_with(VOLUME, FC_CONNECTOR, fss_hosts)
+        mock_fc_initialize_connection.assert_called_once_with(
+            VOLUME,
+            FC_CONNECTOR,
+            fss_hosts)
+
+    @mock.patch.object(proxy.RESTProxy, '_check_fc_host_devices_empty',
+                       return_value=False)
+    @mock.patch.object(proxy.RESTProxy, 'fc_terminate_connection',
+                       return_value=FAKE_ID)
+    def test_terminate_connection(self, mock_fc_terminate_connection,
+                                  mock__check_fc_host_devices_empty):
+        self.driver.terminate_connection(VOLUME, FC_CONNECTOR)
+        mock_fc_terminate_connection.assert_called_once_with(
+            VOLUME,
+            FC_CONNECTOR)
+        mock__check_fc_host_devices_empty.assert_called_once_with(FAKE_ID)
 
 
 class TestRESTProxy(test.TestCase):
@@ -494,6 +511,8 @@ class TestRESTProxy(test.TestCase):
         configuration.san_password = FAKE
         configuration.fss_pool = FAKE_ID
         configuration.fss_debug = False
+        configuration.additional_retry_list = None
+
         self.proxy = proxy.RESTProxy(configuration)
         self.FSS_MOCK = mock.MagicMock()
         self.proxy.FSS = self.FSS_MOCK
@@ -515,17 +534,17 @@ class TestRESTProxy(test.TestCase):
                       sizemb=sizemb,
                       category="virtual",
                       name=volume_name)
-        volume_name, api_res = self.proxy.create_vdev(VOLUME)
+        self.proxy.create_vdev(VOLUME)
         self.FSS_MOCK.create_vdev.assert_called_once_with(params)
 
-    @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name')
+    @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name',
+                       return_value=FAKE_ID)
     def test_extend_volume(self, mock__get_fss_vid_from_name):
         size = self.proxy._convert_size_to_mb(EXTENT_NEW_SIZE - VOLUME['size'])
         params = dict(
             action='expand',
             sizemb=size
         )
-        mock__get_fss_vid_from_name.return_value = FAKE_ID
         volume_name = self.proxy._get_fss_volume_name(VOLUME)
         self.proxy.extend_vdev(volume_name, VOLUME["size"], EXTENT_NEW_SIZE)
 
@@ -533,18 +552,18 @@ class TestRESTProxy(test.TestCase):
                                                             FSS_SINGLE_TYPE)
         self.FSS_MOCK.extend_vdev.assert_called_once_with(FAKE_ID, params)
 
-    @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name')
+    @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name',
+                       return_value=FAKE_ID)
     def test_delete_volume(self, mock__get_fss_vid_from_name):
-        mock__get_fss_vid_from_name.return_value = FAKE_ID
         volume_name = self.proxy._get_fss_volume_name(VOLUME)
         self.proxy.delete_vdev(VOLUME)
         mock__get_fss_vid_from_name.assert_called_once_with(volume_name,
                                                             FSS_SINGLE_TYPE)
         self.FSS_MOCK.delete_vdev.assert_called_once_with(FAKE_ID)
 
-    @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name')
+    @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name',
+                       return_value=FAKE_ID)
     def test_clone_volume(self, mock__get_fss_vid_from_name):
-        mock__get_fss_vid_from_name.return_value = FAKE_ID
         self.FSS_MOCK.create_mirror.return_value = API_RESPONSE
         self.FSS_MOCK.sync_mirror.return_value = API_RESPONSE
         mirror_params = dict(
@@ -562,46 +581,44 @@ class TestRESTProxy(test.TestCase):
         self.assertNotEqual(ret, VOLUME_METADATA)
 
     @mock.patch.object(proxy.RESTProxy, 'create_vdev_snapshot')
-    @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name')
-    @mock.patch.object(proxy.RESTProxy, '_get_vol_name_from_snap')
+    @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name',
+                       return_value=FAKE_ID)
+    @mock.patch.object(proxy.RESTProxy, '_get_vol_name_from_snap',
+                       return_value=VOLUME_NAME)
     def test_create_snapshot(self, mock__get_vol_name_from_snap,
                              mock__get_fss_vid_from_name,
                              mock_create_vdev_snapshot):
-
-        mock__get_vol_name_from_snap.return_value = VOLUME_NAME
-        mock__get_fss_vid_from_name.return_value = FAKE_ID
-
-        self.FSS_MOCK._check_if_snapshot_tm_exist.return_value = \
-            [False, False, SNAPSHOT['volume_size']]
+        self.FSS_MOCK._check_if_snapshot_tm_exist.return_value = [
+            False, False, SNAPSHOT['volume_size']]
 
         self.proxy.create_snapshot(SNAPSHOT)
         self.FSS_MOCK._check_if_snapshot_tm_exist.assert_called_once_with(
             FAKE_ID)
         sizemb = self.proxy._convert_size_to_mb(SNAPSHOT['volume_size'])
         mock_create_vdev_snapshot.assert_called_once_with(FAKE_ID, sizemb)
-        self.FSS_MOCK.create_timemark_policy. \
-            assert_called_once_with(FAKE_ID,
-                                    storagepoolid=self.proxy.fss_defined_pool)
-        self.FSS_MOCK.create_timemark. \
-            assert_called_once_with(FAKE_ID, SNAPSHOT["display_name"])
+        self.FSS_MOCK.create_timemark_policy.assert_called_once_with(
+            FAKE_ID,
+            storagepoolid=self.proxy.fss_defined_pool)
+        self.FSS_MOCK.create_timemark.assert_called_once_with(
+            FAKE_ID,
+            SNAPSHOT["display_name"])
 
-    @mock.patch.object(proxy.RESTProxy, '_get_timestamp')
-    @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name')
-    @mock.patch.object(proxy.RESTProxy, '_get_vol_name_from_snap')
+    @mock.patch.object(proxy.RESTProxy, '_get_timestamp',
+                       return_value=RAWTIMESTAMP)
+    @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name',
+                       return_value=FAKE_ID)
+    @mock.patch.object(proxy.RESTProxy, '_get_vol_name_from_snap',
+                       return_value=VOLUME_NAME)
     def test_delete_snapshot(self, mock__get_vol_name_from_snap,
                              mock__get_fss_vid_from_name,
                              mock__get_timestamp):
-
-        mock__get_vol_name_from_snap.return_value = VOLUME_NAME
-        mock__get_fss_vid_from_name.return_value = FAKE_ID
-        mock__get_timestamp.return_value = RAWTIMESTAMP
         timestamp = '%s_%s' % (FAKE_ID, RAWTIMESTAMP)
 
         self.proxy.delete_snapshot(SNAPSHOT)
         mock__get_vol_name_from_snap.assert_called_once_with(SNAPSHOT)
         self.FSS_MOCK.delete_timemark.assert_called_once_with(timestamp)
         self.FSS_MOCK.get_timemark.assert_any_call(FAKE_ID)
-        assert 2 == self.FSS_MOCK.get_timemark.call_count
+        self.assertEqual(2, self.FSS_MOCK.get_timemark.call_count)
 
     @mock.patch.object(proxy.RESTProxy, '_get_timestamp')
     @mock.patch.object(proxy.RESTProxy, '_get_fss_vid_from_name')
@@ -640,18 +657,16 @@ class TestRESTProxy(test.TestCase):
         self.FSS_MOCK.get_timemark.assert_called_once_with(FAKE_ID)
         mock__get_timestamp.assert_called_once_with(tm_info,
                                                     SNAPSHOT['display_name'])
-        self.FSS_MOCK.copy_timemark. \
-            assert_called_once_with(timestamp,
-                                    storagepoolid=self.proxy.fss_defined_pool,
-                                    name=new_vol_name)
+        self.FSS_MOCK.copy_timemark.assert_called_once_with(
+            timestamp,
+            storagepoolid=self.proxy.fss_defined_pool,
+            name=new_vol_name)
 
     @mock.patch.object(proxy.RESTProxy, '_get_group_name_from_id')
     def test_create_consistency_group(self, mock__get_group_name_from_id):
 
         mock__get_group_name_from_id.return_value = CONSISTGROUP['name']
-        params = dict(
-            name=CONSISTGROUP['name']
-        )
+        params = dict(name=CONSISTGROUP['name'])
         self.proxy.create_group(CONSISTGROUP)
         self.FSS_MOCK.create_group.assert_called_once_with(params)
 
@@ -675,12 +690,12 @@ class TestRESTProxy(test.TestCase):
     def test_update_consistency_group(self, mock__get_group_name_from_id,
                                       mock__get_fss_gid_from_name,
                                       mock__get_fss_vid_from_name):
-        JOIN_VID_LIST = [1, 2]
-        LEAVE_VID_LIST = [3, 4]
+        join_vid_list = [1, 2]
+        leave_vid_list = [3, 4]
         mock__get_group_name_from_id.return_value = CONSISTGROUP['name']
         mock__get_fss_gid_from_name.return_value = FAKE_ID
-        mock__get_fss_vid_from_name.side_effect = [JOIN_VID_LIST,
-                                                   LEAVE_VID_LIST]
+        mock__get_fss_vid_from_name.side_effect = [join_vid_list,
+                                                   leave_vid_list]
         add_vols = [
             {'name': 'vol1', 'id': 'vol1'},
             {'name': 'vol2', 'id': 'vol2'}
@@ -701,18 +716,18 @@ class TestRESTProxy(test.TestCase):
 
         if expected_remvollist:
             mock__get_fss_vid_from_name.assert_any_call(expected_remvollist)
-        assert 2 == mock__get_fss_vid_from_name.call_count
+        self.assertEqual(2, mock__get_fss_vid_from_name.call_count)
 
         join_params = dict()
         leave_params = dict()
 
         join_params.update(
             action='join',
-            virtualdevices=JOIN_VID_LIST
+            virtualdevices=join_vid_list
         )
         leave_params.update(
             action='leave',
-            virtualdevices=LEAVE_VID_LIST
+            virtualdevices=leave_vid_list
         )
         self.FSS_MOCK.set_group.assert_called_once_with(FAKE_ID, join_params,
                                                         leave_params)
@@ -736,8 +751,10 @@ class TestRESTProxy(test.TestCase):
         mock__get_fss_gid_from_name.return_value = FAKE_ID
         mock__get_vdev_id_from_group_id.return_value = vid_list
         gsnap_name = self.proxy._encode_name(CG_SNAPSHOT['id'])
-        self.FSS_MOCK. \
-            _check_if_snapshot_tm_exist.return_value = (False, False, 1024)
+        self.FSS_MOCK._check_if_snapshot_tm_exist.return_value = (
+            False,
+            False,
+            1024)
 
         self.proxy.create_cgsnapshot(CG_SNAPSHOT)
         mock__get_group_name_from_id.assert_called_once_with(
@@ -748,10 +765,9 @@ class TestRESTProxy(test.TestCase):
         for vid in vid_list:
             self.FSS_MOCK._check_if_snapshot_tm_exist.assert_called_with(vid)
             mock_create_vdev_snapshot.assert_called_once_with(vid, 1024)
-            self.FSS_MOCK.create_timemark_policy. \
-                assert_called_once_with(vid,
-                                        storagepoolid=self.proxy.
-                                        fss_defined_pool)
+            self.FSS_MOCK.create_timemark_policy.assert_called_once_with(
+                vid,
+                storagepoolid=self.proxy.fss_defined_pool)
 
         mock_create_group_timemark.assert_called_once_with(FAKE_ID, gsnap_name)
 
@@ -796,7 +812,7 @@ class TestRESTProxy(test.TestCase):
         self.proxy.delete_cgsnapshot(CG_SNAPSHOT)
         mock__get_fss_group_membercount.assert_called_once_with(FAKE_ID)
 
-        assert 2 == self.FSS_MOCK.get_group_timemark.call_count
+        self.assertEqual(2, self.FSS_MOCK.get_group_timemark.call_count)
         self.FSS_MOCK.get_group_timemark.assert_any_call(FAKE_ID)
         rawtimestamp = self.proxy._get_timestamp(tm_info, encode_snap_name)
         timestamp = '%s_%s' % (FAKE_ID, rawtimestamp)
@@ -811,16 +827,19 @@ class TestRESTProxy(test.TestCase):
         fss_hosts.append(PRIMARY_IP)
         self.proxy.initialize_connection_iscsi(VOLUME, ISCSI_CONNECTOR,
                                                fss_hosts)
-        mock_initialize_connection_iscsi. \
-            assert_called_once_with(VOLUME, ISCSI_CONNECTOR, fss_hosts)
+        mock_initialize_connection_iscsi.assert_called_once_with(
+            VOLUME,
+            ISCSI_CONNECTOR,
+            fss_hosts)
 
     @mock.patch.object(proxy.RESTProxy, 'terminate_connection_iscsi')
     def test_iscsi_terminate_connection(self, mock_terminate_connection_iscsi):
         self.FSS_MOCK._get_target_info.return_value = (FAKE_ID, INITIATOR_IQN)
 
         self.proxy.terminate_connection_iscsi(VOLUME, ISCSI_CONNECTOR)
-        mock_terminate_connection_iscsi. \
-            assert_called_once_with(VOLUME, ISCSI_CONNECTOR)
+        mock_terminate_connection_iscsi.assert_called_once_with(
+            VOLUME,
+            ISCSI_CONNECTOR)
 
     @mock.patch.object(proxy.RESTProxy, 'rename_vdev')
     @mock.patch.object(proxy.RESTProxy, '_get_fss_volume_name')

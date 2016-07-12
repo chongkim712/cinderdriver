@@ -19,36 +19,48 @@ This driver requires FSS-8.00-8865 or later.
 
 import math
 import re
+
+from oslo_config import cfg
+from oslo_log import log as logging
+from oslo_utils import excutils
+from oslo_utils import units
 import six
 
-from . import *  # NOQA
 from cinder import exception
 from cinder.i18n import _, _LE, _LI, _LW
 from cinder.image import image_utils
-from cinder.volume import driver
 from cinder.volume.drivers.falconstor import rest_proxy
 from cinder.volume.drivers.san import san
-from oslo_utils import excutils
-from oslo_utils import units
+
+LOG = logging.getLogger(__name__)
+
+FSS_OPTS = [
+    cfg.IntOpt('fss_pool',
+               default='',
+               help='FSS pool id in which FalconStor volumes are stored.'),
+    cfg.BoolOpt('fss_debug',
+                default=False,
+                help="Enable HTTP debugging to FSS"),
+    cfg.StrOpt('additional_retry_list',
+               default='',
+               help='FSS additional retry list, separate by ;')
+]
+
+CONF = cfg.CONF
+CONF.register_opts(FSS_OPTS)
 
 
-class FalconstorBaseDriver(san.SanDriver,
-                           driver.ManageableVD,
-                           driver.ExtendVD,
-                           driver.SnapshotVD,
-                           driver.ConsistencyGroupVD,
-                           driver.TransferVD):
+class FalconstorBaseDriver(san.SanDriver):
 
     def __init__(self, *args, **kwargs):
         super(FalconstorBaseDriver, self).__init__(*args, **kwargs)
         if self.configuration:
             self.configuration.append_config_values(FSS_OPTS)
-        if self.configuration.additional_retry_list:
-            RETRY_LIST.append(self.configuration.additional_retry_list)
+
         self.proxy = rest_proxy.RESTProxy(self.configuration)
-        self.backend_name = (
+        self._backend_name = (
             self.configuration.safe_get('volume_backend_name') or 'FalconStor')
-        self.storage_protocol = 'iSCSI'
+        self._storage_protocol = 'iSCSI'
 
     def do_setup(self, context):
         self.proxy.do_setup()
@@ -383,9 +395,3 @@ class FalconstorBaseDriver(san.SanDriver,
                                  tmp,
                                  self.configuration.volume_dd_blocksize,
                                  size=volume['size'])
-
-    def copy_volume_to_image(self, context, volume, image_service, image_meta):
-        """Copy the volume to the specified image."""
-        super(FalconstorBaseDriver, self).copy_volume_to_image(context, volume,
-                                                               image_service,
-                                                               image_meta)
