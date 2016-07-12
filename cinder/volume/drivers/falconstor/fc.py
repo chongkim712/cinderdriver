@@ -17,21 +17,17 @@
 This driver requires FSS-8.00-8865 or later.
 """
 
-from oslo_log import log as logging
-
 from cinder import exception
 from cinder.i18n import _, _LE
-from cinder import interface
-import cinder.volume.driver
 from cinder.volume.drivers.falconstor import fss_common
 from cinder.zonemanager import utils as fczm_utils
+from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
 
 
-@interface.volumedriver
-class FSSFCDriver(fss_common.FalconstorBaseDriver,
-                  cinder.volume.driver.FibreChannelDriver):
+class FSSFCDriver(fss_common.FalconstorBaseDriver):
+
     """Implements commands for FalconStor FSS FC management.
 
     To enable the driver add the following line to the cinder configuration:
