@@ -17,12 +17,16 @@
 This driver requires FSS-8.00-8865 or later.
 """
 
+from cinder import interface
+import cinder.volume.driver
 from cinder.volume.drivers.falconstor import fss_common
 
 DEFAULT_ISCSI_PORT = 3260
 
 
-class FSSISCSIDriver(fss_common.FalconstorBaseDriver):
+@interface.volumedriver
+class FSSISCSIDriver(fss_common.FalconstorBaseDriver,
+                     cinder.volume.driver.ISCSIDriver):
 
     """Implements commands for FalconStor FSS ISCSI management.
 
@@ -39,12 +43,13 @@ class FSSISCSIDriver(fss_common.FalconstorBaseDriver):
         metadata TypeError
         2.0.0 - Mitaka driver
                 -- fixed consisgroup commands error.
-        2.0.1 - fixed bugs
-        2.0.2 - support Multipath
+        2.0.1   -- fixed bugs
+        2.0.2   -- support Multipath
+        3.0.0 - Newton driver
 
     """
 
-    VERSION = '2.0.2'
+    VERSION = '3.0.0'
 
     def __init__(self, *args, **kwargs):
         super(FSSISCSIDriver, self).__init__(*args, **kwargs)
